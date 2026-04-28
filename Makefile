@@ -1,34 +1,33 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Iinclude
-LDFLAGS = -lcurl -lsqlite3
+CFLAGS = -Wall -Wextra
+LDFLAGS = 
 
 SRC_DIR = src
-INC_DIR = include
 OBJ_DIR = obj
 BIN_DIR = bin
 
-TARGET = $(BIN_DIR)/auracli
+TARGET = $(BIN_DIR)/aura_cli
 
 SRCS = $(wildcard $(SRC_DIR)/*.c)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
 
-all: directories $(TARGET)
+# Créer les dossiers si nécessaire et compiler la cible
+all: $(OBJ_DIR) $(BIN_DIR) $(TARGET)
 
-directories:
-	@mkdir -p $(OBJ_DIR) $(BIN_DIR)
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
 
 $(TARGET): $(OBJS)
 	$(CC) $(OBJS) -o $@ $(LDFLAGS)
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# Nettoyer les objets (.o) et l'exécutable (bin/)
 clean:
-	rm -rf $(OBJ_DIR)/*.o
+	rm -rf $(OBJ_DIR)/* $(BIN_DIR)/*
 
-fclean: clean
-	rm -rf $(BIN_DIR)/*
-
-re: fclean all
-
-.PHONY: all directories clean fclean re
+.PHONY: all clean
