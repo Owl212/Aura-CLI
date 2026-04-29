@@ -72,7 +72,11 @@ static gboolean update_ui_after_ai(gpointer user_data) {
             append_log(res->parsed_text);
             
             int score_simule = rand() % 11;
-            save_score(res->nom, score_simule);
+            const char* cat_name = "Inconnu";
+            if (res->tab->category) {
+                cat_name = res->tab->category;
+            }
+            save_score(res->nom, score_simule, cat_name);
             
             char score_msg[128];
             snprintf(score_msg, sizeof(score_msg), "[Système] Score de %d/10 sauvegardé en BDD pour %s.", score_simule, res->nom);

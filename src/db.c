@@ -37,7 +37,8 @@ void init_db() {
     const char *sql = "CREATE TABLE IF NOT EXISTS interviews ("
                       "id INTEGER PRIMARY KEY AUTOINCREMENT,"
                       "user_name TEXT NOT NULL,"
-                      "score INTEGER NOT NULL);";
+                      "score INTEGER NOT NULL,"
+                      "categorie TEXT);";
     
     rc = sqlite3_exec(db, sql, 0, 0, &err_msg);
     if (rc != SQLITE_OK ) {
@@ -64,7 +65,7 @@ void init_db() {
 // 4. `sqlite3_finalize(stmt)` : Supprime expressément l'objet statement local
 //    en mémoire vive (indispensable pour éviter les memory leaks et les crashs).
 // =====================================================================
-void save_score(const char* user_name, int score) {
+void save_score(const char* user_name, int score, const char* categorie) {
     sqlite3 *db;
     sqlite3_stmt *stmt;
     
@@ -76,13 +77,14 @@ void save_score(const char* user_name, int score) {
     }
     
     // Utilisation de requêtes préparées pour éviter les failles d'injection SQL
-    const char *sql = "INSERT INTO interviews(user_name, score) VALUES(?, ?);";
+    const char *sql = "INSERT INTO interviews(user_name, score, categorie) VALUES(?, ?, ?);";
     
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc == SQLITE_OK) {
         // Lier les variables (1 = user_name, 2 = score)
         sqlite3_bind_text(stmt, 1, user_name, -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(stmt, 2, score);
+        sqlite3_bind_text(stmt, 3, categorie, -1, SQLITE_TRANSIENT);
         
         rc = sqlite3_step(stmt);
         if (rc != SQLITE_DONE) {
@@ -123,11 +125,11 @@ void show_scores() {
         return;
     }
     
-    printf("\n" "\x1b[36m" "=========================================" "\x1b[0m" "\n");
-    printf(" | " "\x1b[33m" "ID" "\x1b[0m" "   | " "\x1b[33m" "UTILISATEUR" "\x1b[0m" "      | " "\x1b[33m" "SCORE" "\x1b[0m" " |\n");
-    printf("-----------------------------------------\n");
+    printf("\n" "\x1b[36m" "============================================================" "\x1b[0m" "\n");
+    printf(" | " "\x1b[33m" "ID" "\x1b[0m" "   | " "\x1b[33m" "UTILISATEUR" "\x1b[0m" "      | " "\x1b[33m" "SCORE" "\x1b[0m" " | " "\x1b[33m" "CATEGORIE" "\x1b[0m" "   |\n");
+    printf("------------------------------------------------------------\n");
     
-    const char* sql = "SELECT id, user_name, score FROM interviews;";
+    const char* sql = "SELECT id, user_name, score, categorie FROM interviews;";
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     
     if (rc == SQLITE_OK) {
@@ -136,8 +138,9 @@ void show_scores() {
             int id = sqlite3_column_int(stmt, 0);
             const unsigned char *name = sqlite3_column_text(stmt, 1);
             int score = sqlite3_column_int(stmt, 2);
+            const unsigned char *cat = sqlite3_column_text(stmt, 3);
             
-            printf(" | %-4d | %-16s | %-5d |\n", id, name ? (const char*)name : "INCONNU", score);
+            printf(" | %-4d | %-16s | %-5d | %-11s |\n", id, name ? (const char*)name : "INCONNU", score, cat ? (const char*)cat : "INCONNU");
         }
         
         // Libération IMPÉRATIVE de la mémoire du "statement"
@@ -146,7 +149,7 @@ void show_scores() {
         fprintf(stderr, "Erreur SELECT SQL: %s\n", sqlite3_errmsg(db));
     }
     
-    printf("\x1b[36m" "=========================================" "\x1b[0m" "\n");
+    printf("\x1b[36m" "============================================================" "\x1b[0m" "\n");
     
     sqlite3_close(db);
 }
