@@ -1,4 +1,4 @@
-#include <gtk/gtk.h>
+ï»¿#include <gtk/gtk.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +10,8 @@ GtkWidget *text_view;
 GtkWidget *entry_nom;
 GtkWidget *entry_reponse;
 GtkTextBuffer *buffer;
+GtkWidget *spinner;
+GtkWidget *btn_send;
 
 // Fonction pour ajouter du texte dans la zone principale
 void append_log(const gchar *text) {
@@ -18,13 +20,78 @@ void append_log(const gchar *text) {
     gtk_text_buffer_insert(buffer, &iter, text, -1);
     gtk_text_buffer_insert(buffer, &iter, "\n", -1);
     
-    // Auto-scroll en bas de la fenêtre
     GtkTextMark *mark = gtk_text_buffer_create_mark(buffer, NULL, &iter, FALSE);
     gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(text_view), mark, 0.0, FALSE, 0.0, 0.0);
     gtk_text_buffer_delete_mark(buffer, mark);
+}
+
+// --- Structures pour le Threading ---
+typedef struct {
+    gchar *nom;
+    gchar *prompt_complet;
+} AskAIData;
+
+typedef struct {
+    gchar *nom;
+    gchar *parsed_text;
+    gchar *error_msg;
+} ResultData;
+
+// Fonction exÃ©cutÃ©e dans le thread principal (UI) aprÃ¨s le thread rÃ©seau
+static gboolean update_ui_after_ai(gpointer user_data) {
+    ResultData *res = (ResultData *)user_data;
+
+    if (res->parsed_text) {
+        append_log("[IA Aura] :");
+        append_log(res->parsed_text);
+        
+        int score_simule = rand() % 11;
+        save_score(res->nom, score_simule);
+        
+        char score_msg[128];
+        snprintf(score_msg, sizeof(score_msg), "[SystÃ¨me] Score alÃ©atoire sauvÃ© : %d/10 pour %s.", score_simule, res->nom);
+        append_log(score_msg);
+
+        free(res->parsed_text);
+    } else if (res->error_msg) {
+        append_log(res->error_msg);
+        g_free(res->error_msg);
+    } else {
+        append_log("[Erreur] Impossible de lire la rÃ©ponse IA.");
+    }
+
+    g_free(res->nom);
+    g_free(res);
+
+    // ArrÃªter l'animation et rÃ©activer le bouton
+    gtk_spinner_stop(GTK_SPINNER(spinner));
+    gtk_widget_set_sensitive(btn_send, TRUE);
+
+    return G_SOURCE_REMOVE;
+}
+
+// Le travail rÃ©seau dans un thread sÃ©parÃ©
+static gpointer thread_ask_ai(gpointer user_data) {
+    AskAIData *data = (AskAIData *)user_data;
+    ResultData *res = g_malloc0(sizeof(ResultData));
+    res->nom = g_strdup(data->nom);
+
+    char *raw_json = ask_ai(data->prompt_complet);
+    if (raw_json != NULL) {
+        res->parsed_text = parse_ai_response(raw_json);
+        free(raw_json);
+    } else {
+        res->error_msg = g_strdup("[Erreur API] Aucune connexion ou AURA_API_KEY manquante.");
+    }
+
+    g_free(data->nom);
+    g_free(data->prompt_complet);
+    g_free(data);
+
+    // Mettre Ã  jour l'UI dans la boucle d'Ã©vÃ©nements principale GTK
+    g_idle_add((GSourceFunc)update_ui_after_ai, res);
     
-    // Forcer l'affichage immédiat (utile avant un long blocage)
-    while (gtk_events_pending()) gtk_main_iteration();
+    return NULL;
 }
 
 // Callback bouton "Envoyer"
@@ -35,81 +102,47 @@ static void on_envoyer_clicked(GtkWidget *widget, gpointer data) {
     const gchar *reponse = gtk_entry_get_text(GTK_ENTRY(entry_reponse));
     
     if (strlen(nom) == 0 || strlen(reponse) == 0) {
-        append_log("[Système] Veuillez remplir votre nom et votre réponse.");
+        append_log("[SystÃ¨me] Veuillez remplir votre nom et votre rÃ©ponse.");
         return;
     }
     
     char log_msg[512];
-    snprintf(log_msg, sizeof(log_msg), "[%s] Réponse : %s", nom, reponse);
+    snprintf(log_msg, sizeof(log_msg), "[%s] RÃ©ponse : %s", nom, reponse);
     append_log(log_msg);
-    append_log("> Analyse de votre réponse par l'IA Groq (Veuillez patienter...) ");
+    append_log("> Analyse de votre rÃ©ponse par l'IA Groq (Veuillez patienter...) " );
     
-    char prompt_complet[1024];
-    snprintf(prompt_complet, sizeof(prompt_complet),
-             "L'étudiant a répondu : %s. Donne une note sur 10 et un court commentaire.", 
-             reponse);
+    AskAIData *thread_data = g_malloc(sizeof(AskAIData));
+    thread_data->nom = g_strdup(nom);
+    thread_data->prompt_complet = g_strdup_printf("L'Ã©tudiant a rÃ©pondu : %s. Donne une note sur 10 et un court commentaire.", reponse);
 
-    // Blocage normal de libcurl - L'UI gèle pendant quelques secondes
-    char *raw_json = ask_ai(prompt_complet);
-    
-    if (raw_json != NULL) {
-        char *parsed_text = parse_ai_response(raw_json);
-        if (parsed_text != NULL) {
-            append_log("[IA Aura] :");
-            append_log(parsed_text);
-            free(parsed_text);
-            
-            int score_simule = rand() % 11;
-            save_score(nom, score_simule);
-            
-            char score_msg[128];
-            snprintf(score_msg, sizeof(score_msg), "[Système] Score aléatoire sauvé : %d/10 pour %s.", score_simule, nom);
-            append_log(score_msg);
-        } else {
-            append_log("[Erreur] Impossible de lire la réponse IA.");
-        }
-        free(raw_json);
-    } else {
-         append_log("[Erreur API] Aucune connexion ou AURA_API_KEY manquante.");
-    }
-    
-    // Vider le champ réponse
     gtk_entry_set_text(GTK_ENTRY(entry_reponse), "");
+
+    // DÃ©marrer l'animation spinner et dÃ©sactiver le bouton
+    gtk_spinner_start(GTK_SPINNER(spinner));
+    gtk_widget_set_sensitive(btn_send, FALSE);
+
+    // Lancer la requÃªte dans un thread pour ne pas freezer l'interface
+    g_thread_new("AITask", thread_ask_ai, thread_data);
 }
 
-// Callback bouton "Historique" (Simplifié, on pourrait afficher dans le terminal ou textview)
 static void on_historique_clicked(GtkWidget *widget, gpointer data) {
     (void)widget; (void)data;
-    append_log("[Système] Affichage de l'historique dans la base de données :");
-    // Dans une vraie appli, on réécrirait show_scores pour renvoyer une string.
-    // Ici on affiche un message, show_scores() va printeur en arriere plan dans le terminal.
-    append_log("(L'historique détaillé s'est affiché dans le terminal arrière-plan)");
+    append_log("[SystÃ¨me] Affichage de l'historique dans le terminal de fond.");
     show_scores();
 }
 
 int main(int argc, char *argv[]) {
-    // Protection API au lancement
-    if (getenv("AURA_API_KEY") == NULL) {
-        printf("Clé API manquante dans l'environnement\n");
-        return 1;
-    }
-
-    init_db();
-
     // Initialisation GTK
     gtk_init(&argc, &argv);
 
-    // Fenêtre principale
     GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(window), "Aura-CLI (Version Desktop)");
+    gtk_window_set_title(GTK_WINDOW(window), "Aura-CLI (Version Desktop Multi-Threaded)");
     gtk_window_set_default_size(GTK_WINDOW(window), 600, 400);
     g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
-    // Conteneur Vertical Principal
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_container_add(GTK_CONTAINER(window), vbox);
 
-    // Zone de texte (Logs)
     GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_widget_set_vexpand(scroll, TRUE);
     text_view = gtk_text_view_new();
@@ -120,39 +153,35 @@ int main(int argc, char *argv[]) {
     gtk_container_add(GTK_CONTAINER(scroll), text_view);
     gtk_box_pack_start(GTK_BOX(vbox), scroll, TRUE, TRUE, 0);
 
-    // Champs nom
     entry_nom = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_nom), "Votre nom...");
     gtk_box_pack_start(GTK_BOX(vbox), entry_nom, FALSE, FALSE, 0);
 
-    // Question
     GtkWidget *label_q = gtk_label_new("Question : Qu'est-ce qu'un pointeur en C ?");
     gtk_box_pack_start(GTK_BOX(vbox), label_q, FALSE, FALSE, 0);
 
-    // Champ réponse
     entry_reponse = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_reponse), "Votre réponse ici...");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_reponse), "Votre rÃ©ponse ici...");
     gtk_box_pack_start(GTK_BOX(vbox), entry_reponse, FALSE, FALSE, 0);
 
-    // Conteneur Horizontal pour les boutons
     GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_pack_start(GTK_BOX(vbox), hbox, FALSE, FALSE, 0);
 
-    GtkWidget *btn_send = gtk_button_new_with_label("Envoyer à l'IA");
+    btn_send = gtk_button_new_with_label("Envoyer Ã  l'IA");
     g_signal_connect(btn_send, "clicked", G_CALLBACK(on_envoyer_clicked), NULL);
     gtk_box_pack_start(GTK_BOX(hbox), btn_send, TRUE, TRUE, 0);
+    
+    // Le nouveau composant Spinner (Indicateur de chargement anti-freeze)
+    spinner = gtk_spinner_new();
+    gtk_box_pack_start(GTK_BOX(hbox), spinner, FALSE, FALSE, 5);
 
     GtkWidget *btn_hist = gtk_button_new_with_label("Voir l'Historique");
     g_signal_connect(btn_hist, "clicked", G_CALLBACK(on_historique_clicked), NULL);
     gtk_box_pack_start(GTK_BOX(hbox), btn_hist, TRUE, TRUE, 0);
 
-    // Message de bienvenue
     append_log("=== Bienvenue sur AURA Desktop ===");
 
-    // Affichage
     gtk_widget_show_all(window);
-    
-    // Boucle d'événements principale
     gtk_main();
 
     return 0;
