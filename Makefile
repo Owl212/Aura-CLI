@@ -1,6 +1,6 @@
-CC = gcc
+﻿CC = gcc
 CFLAGS = -Wall -Wextra -Iinclude `pkg-config --cflags gtk+-3.0`
-LDFLAGS = -lcurl -lsqlite3 `pkg-config --libs gtk+-3.0`
+LDFLAGS = `pkg-config --libs gtk+-3.0` -lcurl -lsqlite3
 
 SRC_DIR = src
 OBJ_DIR = obj
@@ -12,7 +12,6 @@ TARGET = $(BIN_DIR)/aura_cli
 SRCS = $(wildcard $(SRC_DIR)/*.c)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
 
-# Créer les dossiers si nécessaire et compiler la cible
 all: $(OBJ_DIR) $(BIN_DIR) $(DATA_DIR) $(TARGET)
 
 $(OBJ_DIR):
@@ -30,8 +29,8 @@ $(TARGET): $(OBJS)
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Nettoyer les objets (.o) et l'exécutable (bin/)
 clean:
 	rm -rf $(OBJ_DIR)/* $(BIN_DIR)/*
 
 .PHONY: all clean
+
