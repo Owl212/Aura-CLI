@@ -83,16 +83,14 @@ static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, voi
 // être libéré (`free()`) par l'appelant après récupération du résultat pour éviter 
 // une "fuite de mémoire" (Memory leak).
 // =====================================================================
-char* ask_ai(const char* prompt_etudiant) {
+static char* send_curl_request(const char* post_data) {
     CURL *curl;
     CURLcode res;
     struct MemoryStruct chunk;
     
-    // Initialisation
     chunk.memory = malloc(1);
     chunk.size = 0;
 
-    // Lecture de la clé API
     const char* api_key = getenv("AURA_API_KEY");
     if (api_key == NULL) {
         fprintf(stderr, "Erreur : La variable d'environnement AURA_API_KEY n'est pas definie.\n");
@@ -106,51 +104,105 @@ char* ask_ai(const char* prompt_etudiant) {
     if(curl) {
         struct curl_slist *headers = NULL;
         
-        // Construction des headers HTTP
         char auth_header[256];
         snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", api_key);
         headers = curl_slist_append(headers, auth_header);
         headers = curl_slist_append(headers, "Content-Type: application/json");
 
-        // Construction du payload JSON (requête brute simple)
-        // Note: On utilise llama3 comme modèle d'exemple sur Groq
-        char post_data[2048];
-        snprintf(post_data, sizeof(post_data),
-                 "{\"model\": \"llama3-8b-8192\", \"messages\": [{\"role\": \"user\", \"content\": \"%s\"}]}",
-                 prompt_etudiant);
-
-        // Configuration de curl
         curl_easy_setopt(curl, CURLOPT_URL, "https://api.groq.com/openai/v1/chat/completions");
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
         
-        // Configuration de la fonction de rappel (callback)
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
 
-        // Activation de la callback de progression (animation)
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
         curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
 
-        // Exécution de la requête POST
         res = curl_easy_perform(curl);
         
-        // Protection 2 : Si pas d'internet ou API injoignable
         if(res != CURLE_OK) {
             fprintf(stderr, "Erreur de connexion : %s\n", curl_easy_strerror(res));
-            free(chunk.memory); // On libère la mémoire pour éviter une fuite
-            chunk.memory = NULL; // On retourne NULL de manière sécurisée
+            free(chunk.memory);
+            chunk.memory = NULL;
         }
 
-        // Nettoyage de curl
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
     }
     
     curl_global_cleanup();
     
-    // Retourne la requête brute (à free() par l'appelant plus tard !)
     return chunk.memory;
+}
+
+char* demander_question(int categorie) {
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "model", "llama3-8b-8192");
+    
+    cJSON *messages = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "messages", messages);
+    
+    cJSON *sys_msg = cJSON_CreateObject();
+    cJSON_AddStringToObject(sys_msg, "role", "system");
+    
+    const char *sys_prompt = "Tu es un assistant IA.";
+    switch(categorie) {
+        case 1:
+            sys_prompt = "Tu es un recruteur expert en algorithmique. Pose une question d'entretien classique sur les arbres, tris ou graphes. Attends la réponse.";
+            break;
+        case 2:
+            sys_prompt = "Tu es un recruteur. Pose l'une des énigmes mathématiques les plus célèbres utilisées dans les entretiens (comme celle des bouteilles d'eau empoisonnées, ou des ponts). Ne donne pas la réponse.";
+            break;
+        case 3:
+            sys_prompt = "Tu es un examinateur. Pose une question de culture générale sur l'histoire de l'informatique ou l'architecture matérielle.";
+            break;
+    }
+    cJSON_AddStringToObject(sys_msg, "content", sys_prompt);
+    cJSON_AddItemToArray(messages, sys_msg);
+
+    cJSON *user_msg = cJSON_CreateObject();
+    cJSON_AddStringToObject(user_msg, "role", "user");
+    cJSON_AddStringToObject(user_msg, "content", "Génère la question.");
+    cJSON_AddItemToArray(messages, user_msg);
+
+    char *post_data = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    char *response = send_curl_request(post_data);
+    free(post_data);
+    
+    return response;
+}
+
+char* soumettre_reponse(const char* question_posee, const char* reponse_utilisateur) {
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "model", "llama3-8b-8192");
+    
+    cJSON *messages = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "messages", messages);
+    
+    cJSON *sys_msg = cJSON_CreateObject();
+    cJSON_AddStringToObject(sys_msg, "role", "system");
+    cJSON_AddStringToObject(sys_msg, "content", "Tu es un professeur qui corrige un étudiant sur ses réponses aux questions d'entretien. Sois juste et concis.");
+    cJSON_AddItemToArray(messages, sys_msg);
+
+    cJSON *user_msg = cJSON_CreateObject();
+    cJSON_AddStringToObject(user_msg, "role", "user");
+
+    char buffer[4096];
+    snprintf(buffer, sizeof(buffer), "Voici la question que tu m'as posée : %s. Voici ma réponse : %s. Note-moi sur 10 et corrige-moi.", question_posee, reponse_utilisateur);
+    
+    cJSON_AddStringToObject(user_msg, "content", buffer);
+    cJSON_AddItemToArray(messages, user_msg);
+
+    char *post_data = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    char *response = send_curl_request(post_data);
+    free(post_data);
+    
+    return response;
 }
 
 // =====================================================================

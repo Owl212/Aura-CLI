@@ -26,8 +26,10 @@ TabContext tabs[3];
 typedef struct {
     int action; // 0 = generate, 1 = evaluate
     TabContext *tab;
-    gchar *prompt;
     gchar *nom;
+    int categorie;
+    gchar *question;
+    gchar *reponse;
 } ThreadData;
 
 typedef struct {
@@ -97,7 +99,13 @@ static gpointer thread_ask_ai(gpointer user_data) {
     res->tab = data->tab;
     if (data->nom) res->nom = g_strdup(data->nom);
 
-    char *raw_json = ask_ai(data->prompt);
+    char *raw_json = NULL;
+    if (data->action == 0) {
+        raw_json = demander_question(data->categorie);
+    } else {
+        raw_json = soumettre_reponse(data->question, data->reponse);
+    }
+
     if (raw_json != NULL) {
         res->parsed_text = parse_ai_response(raw_json);
         free(raw_json);
@@ -105,8 +113,9 @@ static gpointer thread_ask_ai(gpointer user_data) {
         res->error_msg = g_strdup("[Erreur API] Aucune connexion ou API Key invalide.");
     }
 
-    g_free(data->prompt);
     if (data->nom) g_free(data->nom);
+    if (data->question) g_free(data->question);
+    if (data->reponse) g_free(data->reponse);
     g_free(data);
 
     g_idle_add((GSourceFunc)update_ui_after_ai, res);
@@ -128,8 +137,8 @@ static void on_generate_clicked(GtkWidget *widget, gpointer data) {
     ThreadData *td = g_malloc0(sizeof(ThreadData));
     td->action = 0;
     td->tab = tab;
-    td->prompt = g_strdup_printf("Tu es un examinateur. Pose une seule question courte sur le thème '%s'. Ne donne pas la réponse. Format brut.", tab->category);
-
+    td->categorie = (int)(tab - tabs) + 1;
+    
     g_thread_new("AIGen", thread_ask_ai, td);
 }
 
@@ -159,8 +168,10 @@ static void on_submit_clicked(GtkWidget *widget, gpointer data) {
     ThreadData *td = g_malloc0(sizeof(ThreadData));
     td->action = 1;
     td->tab = tab;
+    td->categorie = (int)(tab - tabs) + 1;
     td->nom = g_strdup(nom);
-    td->prompt = g_strdup_printf("A la question '%s', l'étudiant a répondu '%s'. Donne une note sur 10 et un commentaire court. Format brut.", question, reponse);
+    td->question = g_strdup(question);
+    td->reponse = g_strdup(reponse);
 
     g_thread_new("AIEval", thread_ask_ai, td);
 }
